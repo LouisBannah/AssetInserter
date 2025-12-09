@@ -1,0 +1,333 @@
+POWERPOINT ADD-IN: ASSET INSERTER
+TECHNICAL DOCUMENTATION (PLAIN TEXT VERSION)
+
+PURPOSE
+
+The Asset Inserter add-in is a PowerPoint PPAM add-in that allows users to quickly browse, preview, and insert SVG icons (and later illustrations) into slides using a custom UI.
+
+The add-in contains:
+
+A Ribbon tab called "Assets"
+
+Two groups: "Insert" and "Settings"
+
+An Icon Picker window that displays thumbnails from a folder
+
+A Settings window for configuring folder paths
+
+A modular structure allowing future addition of illustration picker and manage windows
+
+The add-in uses VBA UserForms (which are supported in PPAM) and does not place ActiveX controls on slides.
+
+ARCHITECTURE SUMMARY
+
+Components:
+A. RibbonX XML (customUI)
+
+Defines the UI: buttons, groups, and tab
+
+Calls VBA procedures through onAction handlers
+
+B. modRibbonCallbacks (Standard Module)
+
+Contains all callback procedures for Ribbon buttons
+
+C. modAssetIcons (Standard Module)
+
+Provides:
+
+Folder path retrieval and storage (using SaveSetting/GetSetting)
+
+File enumeration for icons
+
+SVG insertion into a slide
+
+D. frmIconPicker (UserForm)
+
+Displays all JPG thumbnails in a scrollable grid
+
+Allows selection of multiple icons
+
+Inserts SVGs corresponding to checked items
+
+E. frmIconSettings (UserForm)
+
+Allows user to specify folder paths for SVGs and JPG thumbnails
+
+Saves values to system registry for persistence
+
+F. Future Forms
+
+frmIllustrationPicker (not implemented yet)
+
+frmManage (not implemented yet)
+
+RIBBON XML (customUI)
+
+Below is the full Ribbon definition currently in use.
+
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui"> <ribbon> <tabs> <tab id="tabAssets" label="Assets">
+    <!-- Insert group -->
+    <group id="grpAssets" label="Insert">
+      <button id="btnInsertIcon"
+              label="Icon"
+              size="large"
+              imageMso="ActionInsert"
+              onAction="ShowIconPicker" />
+
+      <button id="btnInsertIllustration"
+              label="Illustration"
+              size="large"
+              imageMso="BackgroundImageGallery"
+              onAction="ShowIllustrationPicker" />
+    </group>
+
+    <!-- Settings group -->
+    <group id="grpSettings" label="Settings">
+      <button id="btnManage"
+              label="Manage"
+              size="large"
+              imageMso="FieldSettings"
+              onAction="ShowManageWindow" />
+
+      <button id="btnFolderPaths"
+              label="Paths"
+              size="large"
+              imageMso="CustomizeSearchFolder"
+              onAction="ShowIconSettings" />
+    </group>
+
+  </tab>
+</tabs>
+
+</ribbon> </customUI>
+
+MODULE: modRibbonCallbacks
+
+This module provides all onAction callbacks.
+Full contents:
+
+Option Explicit
+
+Public g_Ribbon As IRibbonUI
+
+Public Sub ribbonOnLoad(ribbon As IRibbonUI)
+Set g_Ribbon = ribbon
+End Sub
+
+' INSERT GROUP CALLBACKS
+
+Public Sub ShowIconPicker(control As IRibbonControl)
+frmIconPicker.Show
+End Sub
+
+Public Sub ShowIllustrationPicker(control As IRibbonControl)
+MsgBox "Illustration Inserter is not yet implemented.", vbInformation, "Coming Soon"
+End Sub
+
+' SETTINGS GROUP CALLBACKS
+
+Public Sub ShowManageWindow(control As IRibbonControl)
+MsgBox "Manage window not yet implemented.", vbInformation, "Coming Soon"
+End Sub
+
+Public Sub ShowIconSettings(control As IRibbonControl)
+frmIconSettings.Show
+End Sub
+
+MODULE: modAssetIcons
+
+This module manages file system operations and folder paths.
+
+Full contents:
+
+Option Explicit
+
+Private Const APP_NAME As String = "AssetInserter"
+
+Public Function GetSvgFolder() As String
+Dim v As String
+v = GetSetting(APP_NAME, "Icons", "SvgFolder", "")
+If v = "" Then
+v = "C:\Users\Louis\Documents\Projects\AssetInserter\Assets\Icons\svg"
+End If
+GetSvgFolder = v
+End Function
+
+Public Function GetJpgFolder() As String
+Dim v As String
+v = GetSetting(APP_NAME, "Icons", "JpgFolder", "")
+If v = "" Then
+v = "C:\Users\Louis\Documents\Projects\AssetInserter\Assets\Icons\thumb"
+End If
+GetJpgFolder = v
+End Function
+
+Public Sub SaveIconFolders(svgFolder As String, jpgFolder As String)
+SaveSetting APP_NAME, "Icons", "SvgFolder", svgFolder
+SaveSetting APP_NAME, "Icons", "JpgFolder", jpgFolder
+End Sub
+
+Public Function GetIconList() As Collection
+Dim icons As New Collection
+Dim f As String, svg As String, jpg As String
+Dim d As Object
+Dim sf As String, jf As String
+Dim fs As Object
+
+Set fs = CreateObject("Scripting.FileSystemObject")
+
+sf = GetSvgFolder()
+jf = GetJpgFolder()
+If Right(sf, 1) <> "\" Then sf = sf & "\"
+If Right(jf, 1) <> "\" Then jf = jf & "\"
+
+f = Dir$(sf & "*.svg")
+Do While Len(f) > 0
+    svg = sf & f
+    jpg = jf & Replace$(f, ".svg", ".jpg", , , vbTextCompare)
+
+    If fs.FileExists(jpg) Then
+        Set d = CreateObject("Scripting.Dictionary")
+        d("SvgPath") = svg
+        d("JpgPath") = jpg
+        d("FileName") = f
+        icons.Add d
+    End If
+
+    f = Dir$()
+Loop
+
+Set GetIconList = icons
+
+
+End Function
+
+Public Sub InsertSvgIntoActiveSlide(svgPath As String, L As Single, T As Single)
+Dim sld As Slide
+Set sld = ActiveWindow.View.Slide
+sld.Shapes.AddPicture svgPath, msoFalse, msoTrue, L, T, -1, -1
+End Sub
+
+USERFORM: frmIconPicker
+
+Purpose:
+Display a scrollable grid of JPG thumbnails loaded dynamically from folder paths, each paired with a checkbox to select icons for insertion.
+
+Controls:
+
+Frame: fraThumbs
+ScrollBars = fmScrollBarsVertical
+Caption = ""
+
+CommandButton: cmdInsertSelected
+Caption = "Insert Selected"
+
+CommandButton: cmdCancel
+Caption = "Cancel"
+
+Dynamic Controls:
+For each icon:
+
+Image control (Forms.Image.1)
+
+Checkbox below image (Forms.CheckBox.1)
+
+Key code:
+
+LoadThumbnails:
+
+Reads icon list from GetIconList
+
+Calculates grid positions using THUMB_W, THUMB_H, THUMB_MARGIN, THUMB_COLS
+
+Adds image + checkbox for each icon
+
+Sets scroll height
+
+cmdInsertSelected_Click:
+
+Loops through all checkboxes
+
+Inserts selected SVGs using InsertSvgIntoActiveSlide
+
+cmdCancel_Click:
+
+Unloads the form
+
+USERFORM: frmIconSettings
+
+Purpose:
+Allow the user to set folder paths for:
+
+SVG files
+
+JPG thumbnail files
+
+Controls:
+
+TextBox: txtSvgFolder
+
+TextBox: txtJpgFolder
+
+CommandButton: cmdOK
+
+CommandButton: cmdCancel
+
+Key code:
+
+UserForm_Initialize:
+txtSvgFolder.Text = GetSvgFolder()
+txtJpgFolder.Text = GetJpgFolder()
+
+cmdOK_Click:
+SaveIconFolders txtSvgFolder.Text, txtJpgFolder.Text
+Unload Me
+
+cmdCancel_Click:
+Unload Me
+
+FUTURE COMPONENTS (PLACEHOLDERS)
+
+A. frmIllustrationPicker:
+
+Will follow the same layout as frmIconPicker
+
+Will load from separate illustration folders
+
+Uses ShowIllustrationPicker callback
+
+B. frmManage:
+
+May contain metadata editing, refreshing, tagging, or organizational controls
+
+Uses ShowManageWindow callback
+
+INSTALLATION SUMMARY
+
+To install the PPAM:
+
+Save project as .ppam
+
+Ensure no ActiveX objects exist on any slides
+
+Load via PowerPoint:
+File -> Options -> Add-ins -> Manage: PowerPoint Add-ins -> Go -> Add New
+
+KNOWN LIMITATIONS
+
+VBA UserForms do not support virtualization; large lists may scroll slower on very old hardware
+
+SVGs must be supported by PowerPoint version (Office 365+ recommended)
+
+DEVELOPMENT NOTES
+
+Folder paths are stored in registry using SaveSetting/GetSetting
+
+Clearing settings requires DeleteSetting (future feature if needed)
+
+Dynamic control creation can be extended to illustrations easily
+
+modAssetIcons centralizes all file/path logic for maintainability
+
+END OF NOTEPAD-FRIENDLY DOCUMENT
